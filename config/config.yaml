@@ -79,3 +79,31 @@ elasticsearch:
 paths:
   processed_dir: "data/processed"
   alerts_dir: "data/alerts"
+
+# ---------------- PHASE 4: risk scoring ----------------
+risk_weights:
+  # Rule weights — rebalanced so a single strong rule = MEDIUM
+  multiple_failed_logins: 10      # common signal, could be user error
+  unusual_login_time: 10          # many legitimate reasons
+  new_device: 15                  # moderate concern
+  multiple_host_access: 20        # lateral-movement indicator
+  new_mfa_device: 25              # classic MFA-fatigue follow-on
+  privilege_escalation: 25        # escalation step
+  credential_access: 30           # direct credential-dump signal
+  new_privileged_account: 30      # persistence mechanism
+  # ML contribution is tiered, not binary (see Phase 3)
+  ml_anomaly_weak: 5              # >85th pct of normal training scores
+  ml_anomaly_strong: 15           # >97th pct of normal training scores
+  ml_anomaly: 10                  # legacy fallback, unused
+
+severity_bands:
+  low:      [0, 25]
+  medium:   [26, 55]
+  high:     [56, 80]
+  critical: [81, 100]
+
+# ---------------- PHASE 4: alert generation ----------------
+alerts:
+  min_risk_score: 1               # keep all alerts; dashboard filters to MEDIUM+
+  session_gap_minutes: 30         # events closer than this share an incident
+  output_path: "data/alerts/alerts.csv"

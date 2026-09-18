@@ -1,9 +1,9 @@
 """
-Phase 2 — Rule-Based Detection Engine
-=====================================
+Phase 2 — Rule-Based Detection Engine (v2)
+==========================================
 
-Applies 8 configurable behavioural rules to a synthetic security log
-dataset and emits:
+Applies 8 configurable behavioural rules to the enriched security log
+dataset (output of Phase 1.5) and emits:
 
     data/processed/rule_hits.csv         # one row per (event x rule hit)
     data/processed/events_with_rules.csv # events enriched with rule summary
@@ -15,10 +15,16 @@ magic numbers are hard-coded in the rule bodies.
 Rules 1-8 correspond to behaviours documented in the Cisco 2022 incident,
 mapped to observable log signals (see README for the full mapping table).
 
+v2 changes
+----------
+* Default input now reads the enriched event file from Phase 1.5, so the
+  downstream ML detector has access to the new context features
+  (hour_deviation, failed_success_ratio, is_sensitive_host, etc.).
+
 Usage
 -----
     python -m src.rule_engine
-    python -m src.rule_engine --input data/raw/security_logs.csv
+    python -m src.rule_engine --input data/processed/events_enriched.csv
 """
 
 from __future__ import annotations
@@ -30,8 +36,6 @@ from typing import Callable, Dict, List, Optional
 
 import pandas as pd
 import yaml
-
-from src.preprocessing import load_logs
 
 DEFAULT_CONFIG = os.path.join("config", "config.yaml")
 
@@ -76,7 +80,10 @@ def _rule_multiple_failed_logins(row: pd.Series, cfg: Dict) -> Optional[str]:
     window = int(cfg["data_generation"]["feature_window_minutes"])
     count = int(row.get("failed_login_count", 0))
     if count >= threshold and row.get("event_type") == "login":
-        return f"{count} failed logins for '{row['username']}' in the last {window} min"
+        return (
+            f"{count} failed logins for '{row['username']}' "
+            f"in the last {window} min"
+        )
     return None
 
 
@@ -137,8 +144,8 @@ def _rule_new_privileged_account(row: pd.Series, cfg: Dict) -> Optional[str]:
         and str(row.get("privilege_level", "")).lower() == "admin"
     ):
         return (
-            f"New privileged account created on '{row.get('destination_host')}' "
-            f"by '{row['username']}'"
+            f"New privileged account created on "
+            f"'{row.get('destination_host')}' by '{row['username']}'"
         )
     return None
 
@@ -161,7 +168,9 @@ def build_rules(cfg: Dict) -> List[Rule]:
         Rule(
             rule_id="R1",
             name="Multiple Failed Logins",
-            description="User exceeded the failed-login threshold inside a short window.",
+            description=(
+                "User exceeded the failed-login threshold inside a short window."
+            ),
             risk_points=int(w["multiple_failed_logins"]),
             mitre=["T1110 - Brute Force"],
             check=_rule_multiple_failed_logins,
@@ -169,7 +178,9 @@ def build_rules(cfg: Dict) -> List[Rule]:
         Rule(
             rule_id="R2",
             name="Unusual Login Time",
-            description="Successful login outside the user's normal working hours.",
+            description=(
+                "Successful login outside the user's normal working hours."
+            ),
             risk_points=int(w["unusual_login_time"]),
             mitre=["T1078 - Valid Accounts"],
             check=_rule_unusual_login_time,
@@ -177,7 +188,9 @@ def build_rules(cfg: Dict) -> List[Rule]:
         Rule(
             rule_id="R3",
             name="New / Unrecognised Device",
-            description="Login from a device not previously associated with the user.",
+            description=(
+                "Login from a device not previously associated with the user."
+            ),
             risk_points=int(w["new_device"]),
             mitre=["T1078 - Valid Accounts"],
             check=_rule_new_device,
@@ -185,7 +198,9 @@ def build_rules(cfg: Dict) -> List[Rule]:
         Rule(
             rule_id="R4",
             name="New MFA Device Registered",
-            description="A new MFA device was registered — classic MFA-fatigue follow-on.",
+            description=(
+                "A new MFA device was registered — classic MFA-fatigue follow-on."
+            ),
             risk_points=int(w["new_mfa_device"]),
             mitre=["T1098.005 - Account Manipulation: Device Registration"],
             check=_rule_new_mfa_device,
@@ -193,7 +208,9 @@ def build_rules(cfg: Dict) -> List[Rule]:
         Rule(
             rule_id="R5",
             name="Privilege Escalation",
-            description="User account gained higher privileges during the session.",
+            description=(
+                "User account gained higher privileges during the session."
+            ),
             risk_points=int(w["privilege_escalation"]),
             mitre=["T1098 - Account Manipulation"],
             check=_rule_privilege_escalation,
@@ -201,7 +218,9 @@ def build_rules(cfg: Dict) -> List[Rule]:
         Rule(
             rule_id="R6",
             name="Multiple Host Access (Lateral Movement)",
-            description="Rapid access to many distinct hosts — lateral-movement pattern.",
+            description=(
+                "Rapid access to many distinct hosts — lateral-movement pattern."
+            ),
             risk_points=int(w["multiple_host_access"]),
             mitre=["T1021 - Remote Services"],
             check=_rule_multiple_host_access,
@@ -209,7 +228,9 @@ def build_rules(cfg: Dict) -> List[Rule]:
         Rule(
             rule_id="R7",
             name="New Privileged Account Created",
-            description="Creation of a new administrative account — persistence pattern.",
+            description=(
+                "Creation of a new administrative account — persistence pattern."
+            ),
             risk_points=int(w["new_privileged_account"]),
             mitre=["T1136.001 - Create Account: Local Account"],
             check=_rule_new_privileged_account,
@@ -217,7 +238,9 @@ def build_rules(cfg: Dict) -> List[Rule]:
         Rule(
             rule_id="R8",
             name="Credential-Access Activity",
-            description="Simulated credential-access process observed on a host.",
+            description=(
+                "Simulated credential-access process observed on a host."
+            ),
             risk_points=int(w["credential_access"]),
             mitre=["T1003 - OS Credential Dumping"],
             check=_rule_credential_access,
@@ -304,24 +327,48 @@ def _print_summary(hits: pd.DataFrame, events: pd.DataFrame) -> None:
     if hits.empty:
         print("    (no rule hits)")
     else:
-        breakdown = hits.groupby(["rule_id", "rule_name"]).size().reset_index(name="hits")
+        breakdown = (
+            hits.groupby(["rule_id", "rule_name"])
+            .size().reset_index(name="hits")
+        )
         for _, r in breakdown.iterrows():
-            print(f"    {r['rule_id']}  {r['rule_name']:<38} {r['hits']:>6} hits")
+            print(
+                f"    {r['rule_id']}  {r['rule_name']:<38} "
+                f"{r['hits']:>6} hits"
+            )
     print("=" * 66 + "\n")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Phase 2 — rule-based detection.")
+    parser = argparse.ArgumentParser(
+        description="Phase 2 — rule-based detection."
+    )
     parser.add_argument("--config", default=DEFAULT_CONFIG)
-    parser.add_argument("--input", default="data/raw/security_logs.csv")
-    parser.add_argument("--hits-out", default="data/processed/rule_hits.csv")
-    parser.add_argument("--events-out", default="data/processed/events_with_rules.csv")
+    parser.add_argument(
+        "--input",
+        default="data/processed/events_enriched.csv",
+        help="Enriched event file from Phase 1.5.",
+    )
+    parser.add_argument(
+        "--hits-out",
+        default="data/processed/rule_hits.csv",
+    )
+    parser.add_argument(
+        "--events-out",
+        default="data/processed/events_with_rules.csv",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
 
+    if not os.path.exists(args.input):
+        raise FileNotFoundError(
+            f"Input '{args.input}' not found. "
+            f"Run `python -m src.feature_engineering` first."
+        )
+
     print(f"[*] Loading logs from {args.input} ...")
-    df = load_logs(args.input)
+    df = pd.read_csv(args.input, parse_dates=["timestamp"])
     print(f"[*] Loaded {len(df)} events.")
 
     print("[*] Applying rules ...")
