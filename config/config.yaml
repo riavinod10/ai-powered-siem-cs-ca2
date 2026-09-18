@@ -1,0 +1,81 @@
+# ============================================================
+# Central configuration for the AI-Powered SIEM prototype
+# Every module reads from this file so thresholds are never
+# hard-coded in the source.
+# ============================================================
+
+project:
+  name: "AI-Powered SIEM for Credential Theft & Lateral Movement Detection"
+  random_seed: 42
+  case_study: "Cisco Data Breach (2022) — publicly documented behaviours"
+
+# ---------------- PHASE 1: dataset generation ----------------
+data_generation:
+  total_records: 10000
+  normal_ratio: 0.85          # ~8500 normal / ~1500 suspicious
+  start_date: "2024-01-01"
+  days: 30                    # simulated observation window
+  output_path: "data/raw/security_logs.csv"
+  feature_window_minutes: 15  # rolling window for behavioural features
+
+users:
+  normal_users: 40
+  admin_users: 5
+
+working_hours:
+  start: 8
+  end: 19
+
+hosts:
+  internal:
+    - file-server-01
+    - mail-server-01
+    - hr-portal
+    - app-server-01
+    - db-server-01
+  sensitive:
+    - dc-01
+    - backup-server-01
+    - admin-jump-host
+
+# ---------------- PHASE 2: rule thresholds ----------------
+rules:
+  failed_login_threshold: 5      # RULE 1
+  unusual_hour_start: 0          # RULE 2
+  unusual_hour_end: 6
+  host_access_threshold: 4       # RULE 6
+  host_access_window_minutes: 10
+
+# ---------------- PHASE 4: risk scoring ----------------
+risk_weights:
+  multiple_failed_logins: 15
+  unusual_login_time: 10
+  new_device: 10
+  new_mfa_device: 20
+  privilege_escalation: 20
+  multiple_host_access: 15
+  credential_access: 25
+  new_privileged_account: 25
+  ml_anomaly: 10
+
+severity_bands:
+  low:      [0, 30]
+  medium:   [31, 60]
+  high:     [61, 80]
+  critical: [81, 100]
+
+# ---------------- PHASE 3: machine learning ----------------
+ml:
+  contamination: 0.08
+  n_estimators: 200
+  model_path: "models/isolation_forest.pkl"
+
+# ---------------- PHASE 5: Elasticsearch ----------------
+elasticsearch:
+  host: "http://localhost:9200"
+  log_index: "siem-logs"
+  alert_index: "siem-alerts"
+
+paths:
+  processed_dir: "data/processed"
+  alerts_dir: "data/alerts"

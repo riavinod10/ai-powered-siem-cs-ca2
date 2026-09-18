@@ -1,0 +1,24 @@
+# Python virtual environment
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python generated files
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment/secrets
+.env
